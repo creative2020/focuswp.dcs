@@ -1,35 +1,57 @@
 <?php
 /*
-Plugin Name: FocusWP DCS
+Plugin Name: FocusWP DCS MC Searcher
 */
 
 if (!defined( 'WPINC' )) die;
 
-add_action('init', function()
-{
-	$single = 'DCS'; $single_l = strtolower($single);
-	$plural = 'DCS'; $plural_l = strtolower($plural);
-	register_post_type(strtr($single_l, ' ', '-'), [
-		'labels' => [ 'name' => $plural ],
-		'show_ui' => true,
-		'supports' => [ 'title' /*, 'custom-fields'*/ ],
-	]);
-});
+add_filter('woocommerce_order_data_store_cpt_get_orders_query',
+	function($query, $query_vars)
+	{
+		if(isset($query_vars['has_mc']) && $query_vars['has_mc'])
+		{
+			$query['meta_query'][] = array(
+				'key' => 'billing_mc_number',
+				'compare' => 'EXISTS',
+			);
+		}
+
+		return $query;
+	},
+	10, 2 );
 
 add_action('dcs_job', function()
 {
-	$admin_email = get_option('admin_email');
+	//$admin_email = get_option('admin_email');
+	$admin_email = 'support@2020creative.com';
 	$date = strtoupper(current_time('d-M-y'));
+	$subject_prefix = "DCS $date:";
 
-	$ch = curl_init("http://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail?pd_date=$date&pv_vpath=LIVIEW"); 
+	$orders = wc_get_orders([
+		'limit' => -1,
+		'type' => 'shop_order',
+		'status' => [
+			'processing',
+			'completed',
+		],
+		'has_mc' => true,
+	]);
+	$mc_numbers = [];
+	foreach($orders as $order)
+	{
+		$mc_number = $order->get_meta('billing_mc_number', true);
+		$mc_number = preg_replace('/[^0-9]/', '', $mc_number);
+		if($mc_number != '') $mc_numbers[] = $mc_number;
+	}
+	wp_mail($admin_email,
+		"$subject_prefix MC Number Search List",
+		var_export($mc_numbers, true));
+
+	$url = "http://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail?pd_date=$date&pv_vpath=LIVIEW"; 
+	$ch = curl_init($url); 
 	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
 	$res = curl_exec($ch); 
 	curl_close($ch);
-
-	/*
-	file_put_contents("/home/derek/tmp/dcs/$date.html", $res);
-	$res = file_get_contents("/home/derek/tmp/dcs/$date.html");
-	 */
 
 	$doc = DOMDocument::loadHTML($res);
 	$xpath = new DOMXPath($doc);
@@ -42,22 +64,27 @@ add_action('dcs_job', function()
 	do $cpl = $cpl->nextSibling;
 	while($cpl->nodeName != 'table');
 
-	$needles = get_posts([
-		'post_type' => 'dcs',
-		'nopaging' => true
-	]);
-
 	$numbers = $xpath->query(".//th[@scope='row']/text()", $cpl);
-	foreach($numbers as $number) {
-		foreach($needles as $needle) {
-			if(preg_match("/\bMC-{$needle->post_title}\b/", $number->wholeText)) {
+	$found_count = 0;
+	foreach($numbers as $number)
+	{
+		foreach($mc_numbers as $needle)
+		{
+			if(preg_match("/\bMC-$needle\b/", $number->wholeText))
+			{
+				$found_count++;
 				wp_mail($admin_email,
-					'DCS Search Result',
-					"Found MC-{$needle->post_title}"
+					"$subject_prefix Search Result for MC-$needle",
+					"Found MC-$needle"
 				);
 			}
 		}
 	}
+
+	wp_mail($admin_email,
+		"$subject_prefix Search Result Count",
+		"Found $found_count target MC numbers at $url."
+	);
 
 });
 
