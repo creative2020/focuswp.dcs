@@ -20,10 +20,74 @@ add_filter('woocommerce_order_data_store_cpt_get_orders_query',
 	},
 	10, 2 );
 
+function create_update_tables()
+{
+	global $wpdb;
+	$charset_collate = $wpdb->get_charset_collate();
+	require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
+
+	$table_name = $wpdb->prefix . 'fwp_mc_instance';
+	$sql = "CREATE TABLE $table_name (
+		id bigint(20) NOT NULL AUTO_INCREMENT,
+		time datetime DEFAULT '0000-00-00 00:00:00' NOT NULL,
+		PRIMARY KEY  (id)
+	) $charset_collate;";
+	dbDelta( $sql );
+
+	$table_name = $wpdb->prefix . 'fwp_mc_value';
+	$sql = "CREATE TABLE $table_name (
+		id bigint(20) NOT NULL AUTO_INCREMENT,
+		instance_id bigint(20) NOT NULL,
+		value varchar(32) NOT NULL,
+		PRIMARY KEY  (id)
+	) $charset_collate;";
+	dbDelta( $sql );
+}
+
+function insert_instance()
+{
+	global $wpdb;
+
+	$table_name = $wpdb->prefix . 'fwp_mc_instance';
+	$wpdb->insert( $table_name, [ 'time' => current_time( 'mysql' ) ] );
+	return $wpdb->insert_id;
+}
+
+function insert_value($instance_id, $value)
+{
+	global $wpdb;
+
+	$table_name = $wpdb->prefix . 'fwp_mc_value';
+	$wpdb->insert( $table_name, [
+		'instance_id' => $instance_id,
+		'value' => $value
+	] );
+}
+
+function more_junk($needle)
+{
+	global $wpdb;
+
+	$table_i = $wpdb->prefix . 'fwp_mc_instance';
+	$table_v = $wpdb->prefix . 'fwp_mc_value';
+
+	$pq = "SELECT $table_i.time
+		FROM $table_v
+		JOIN $table_i ON $table_i.id = $table_v.instance_id
+		WHERE $table_v.value RLIKE '%sMC-%s%s'";
+	$q = sprintf($pq, '\\\\b', $needle, '\\\\b');
+
+	return $wpdb->get_col($q);
+}
+
 add_action('dcs_job', function()
 {
-	//$admin_email = get_option('admin_email');
-	$admin_email = 'support@2020creative.com';
+	$admin_email = get_option('dcs_notification_email');
+
+	create_update_tables();
+
+	$instance_id = insert_instance();
+
 	$date = strtoupper(current_time('d-M-y'));
 	$subject_prefix = "DCS $date:";
 
@@ -65,25 +129,26 @@ add_action('dcs_job', function()
 	while($cpl->nodeName != 'table');
 
 	$numbers = $xpath->query(".//th[@scope='row']/text()", $cpl);
-	$found_count = 0;
 	foreach($numbers as $number)
+		insert_value($instance_id, $number->wholeText);
+
+	$found_count = 0;
+	foreach($mc_numbers as $needle)
 	{
-		foreach($mc_numbers as $needle)
+		$r = more_junk($needle);
+		if($r)
 		{
-			if(preg_match("/\bMC-$needle\b/", $number->wholeText))
-			{
-				$found_count++;
-				wp_mail($admin_email,
-					"$subject_prefix Search Result for MC-$needle",
-					"Found MC-$needle"
-				);
-			}
+			$found_count++;
+			wp_mail($admin_email,
+				"$subject_prefix Search Result for MC-$needle",
+				"Found MC-$needle\n" . var_export($r, true)
+			);
 		}
 	}
 
 	wp_mail($admin_email,
 		"$subject_prefix Search Result Count",
-		"Found $found_count target MC numbers at $url."
+		"Found $found_count target MC numbers."
 	);
 
 });
@@ -91,6 +156,12 @@ add_action('dcs_job', function()
 function render_dcs_admin_page()
 {
 	echo "<div class='wrap'>";
+
+	echo "<form method='post' action='options.php'>";
+	settings_fields('dcs_option_group');
+	do_settings_sections('dcs_settings');
+	submit_button();
+
 	$next = wp_next_scheduled('dcs_job');
 	$ref = admin_url('admin-post.php');
 	if($next)
@@ -126,7 +197,7 @@ add_action('admin_menu', function()
 
 add_action('admin_post_dcs_sched', function()
 {
-	wp_schedule_event(time(), 'twicedaily', 'dcs_job');
+	wp_schedule_event(time(), 'daily', 'dcs_job');
 	if(wp_get_referer())
 		wp_safe_redirect(wp_get_referer());
 });
@@ -145,7 +216,42 @@ add_action('admin_post_dcs_unschedsched', function()
 	$next = wp_next_scheduled('dcs_job');
 	if($next)
 		wp_unschedule_event($next, 'dcs_job');
-	wp_schedule_event(time(), 'twicedaily', 'dcs_job');
+	wp_schedule_event(time(), 'daily', 'dcs_job');
 	if(wp_get_referer())
 		wp_safe_redirect(wp_get_referer());
+});
+
+add_action('admin_init', function()
+{
+	register_setting(
+		'dcs_option_group',
+		'dcs_notification_email',
+		[
+			'type' => 'string',
+		]
+	);
+
+	add_settings_section(
+		'dcs_settings_section',
+		'',
+		function() { },
+		'dcs_settings'
+	);
+
+	add_settings_field(
+		'dcs_notification_email',
+		'Notification Email Address',
+		function() {
+			$key = 'dcs_notification_email';
+			$value = get_option($key);
+			$style = 'width: 100%;';
+			printf("<input name='%s' value='%s' style='%s'>",
+				$key,
+				$value,
+				$style
+			);
+		},
+		'dcs_settings',
+		'dcs_settings_section'
+	);
 });
