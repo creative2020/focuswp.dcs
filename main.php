@@ -1,6 +1,7 @@
 <?php
 /*
-Plugin Name: FocusWP DCS MC Searcher
+Plugin Name: FocusWP DCS Docket Number Searcher
+Version: 3
 */
 
 if (!defined( 'WPINC' )) die;
@@ -8,10 +9,11 @@ if (!defined( 'WPINC' )) die;
 add_filter('woocommerce_order_data_store_cpt_get_orders_query',
 	function($query, $query_vars)
 	{
-		if(isset($query_vars['has_mc']) && $query_vars['has_mc'])
+		if(isset($query_vars['has_docket_number']) &&
+			$query_vars['has_docket_number'])
 		{
 			$query['meta_query'][] = array(
-				'key' => 'billing_mc_number',
+				'key' => 'docket_number',
 				'compare' => 'EXISTS',
 			);
 		}
@@ -71,10 +73,17 @@ function more_junk($needle)
 	$table_i = $wpdb->prefix . 'fwp_mc_instance';
 	$table_v = $wpdb->prefix . 'fwp_mc_value';
 
+	/*
 	$pq = "SELECT $table_i.time
 		FROM $table_v
 		JOIN $table_i ON $table_i.id = $table_v.instance_id
 		WHERE $table_v.value RLIKE '%sMC-%s%s'";
+	$q = sprintf($pq, '\\\\b', $needle, '\\\\b');
+	*/
+	$pq = "SELECT $table_i.time
+		FROM $table_v
+		JOIN $table_i ON $table_i.id = $table_v.instance_id
+		WHERE $table_v.value RLIKE '%s%s%s'";
 	$q = sprintf($pq, '\\\\b', $needle, '\\\\b');
 
 	return $wpdb->get_col($q);
@@ -98,17 +107,22 @@ add_action('dcs_job', function()
 			'processing',
 			'completed',
 		],
-		'has_mc' => true,
+		'has_docket_number' => true,
 	]);
 	$mc_numbers = [];
 	foreach($orders as $order)
 	{
-		$mc_number = $order->get_meta('billing_mc_number', true);
+		$docket_type = $order->get_meta('docket_type', true);
+		$docket_number = $order->get_meta('docket_number', true);
+		/*
 		$mc_number = preg_replace('/[^0-9]/', '', $mc_number);
 		if($mc_number != '') $mc_numbers[] = $mc_number;
+		*/
+		$mc_numbers[] = sprintf("%s-%s", $docket_type, $docket_number);
 	}
+goto foo;
 	wp_mail($admin_email,
-		"$subject_prefix MC Number Search List",
+		"$subject_prefix Docket Number Search List",
 		var_export($mc_numbers, true));
 
 	$url = "http://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail?pd_date=$date&pv_vpath=LIVIEW"; 
@@ -131,6 +145,7 @@ add_action('dcs_job', function()
 	$numbers = $xpath->query(".//th[@scope='row']/text()", $cpl);
 	foreach($numbers as $number)
 		insert_value($instance_id, $number->wholeText);
+foo:
 
 	$found_count = 0;
 	foreach($mc_numbers as $needle)
@@ -140,15 +155,15 @@ add_action('dcs_job', function()
 		{
 			$found_count++;
 			wp_mail($admin_email,
-				"$subject_prefix Search Result for MC-$needle",
-				"Found MC-$needle\n" . var_export($r, true)
+				"$subject_prefix Search Result for $needle",
+				"Found $needle\n" . var_export($r, true)
 			);
 		}
 	}
 
 	wp_mail($admin_email,
 		"$subject_prefix Search Result Count",
-		"Found $found_count target MC numbers."
+		"Found $found_count target docket numbers."
 	);
 
 });
