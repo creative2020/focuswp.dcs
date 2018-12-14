@@ -28,22 +28,51 @@ function create_update_tables()
 	$charset_collate = $wpdb->get_charset_collate();
 	require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
 
-	$table_name = $wpdb->prefix . 'fwp_mc_instance';
-	$sql = "CREATE TABLE $table_name (
+	$tbl_i = $wpdb->prefix . 'fwp_mc_instance';
+	$sql = "CREATE TABLE $tbl_i (
 		id bigint(20) NOT NULL AUTO_INCREMENT,
 		time datetime DEFAULT '0000-00-00 00:00:00' NOT NULL,
 		PRIMARY KEY  (id)
 	) $charset_collate;";
 	dbDelta( $sql );
 
-	$table_name = $wpdb->prefix . 'fwp_mc_value';
-	$sql = "CREATE TABLE $table_name (
+	$tbl_v = $wpdb->prefix . 'fwp_mc_value';
+	$sql = "CREATE TABLE $tbl_v (
 		id bigint(20) NOT NULL AUTO_INCREMENT,
 		instance_id bigint(20) NOT NULL,
 		value varchar(32) NOT NULL,
 		PRIMARY KEY  (id)
 	) $charset_collate;";
 	dbDelta( $sql );
+
+	cleanup();
+}
+
+function cleanup()
+{
+	global $wpdb;
+	$tbl_i = $wpdb->prefix . 'fwp_mc_instance';
+	$tbl_v = $wpdb->prefix . 'fwp_mc_value';
+
+	$retention = get_option('dcs_retention_days');
+	if($retention)
+	{
+		$tz = new DateTimeZone(get_option('timezone_string'));
+		$t = new DateTime('00:00', $tz);
+		$t->sub(new DateInterval("P{$retention}D"));
+
+		$sql = "DELETE FROM $tbl_v
+			WHERE instance_id IN (
+				SELECT id FROM $tbl_i
+				WHERE time < %s
+			)";
+		$pq = $wpdb->prepare($sql, $t->format('Y-m-d H:i:s'));
+		$wpdb->query($pq);
+
+		$sql = "DELETE FROM $tbl_i WHERE time < %s";
+		$pq = $wpdb->prepare($sql, $t->format('Y-m-d H:i:s'));
+		$wpdb->query($pq);
+	}
 }
 
 function insert_instance()
@@ -120,7 +149,6 @@ add_action('dcs_job', function()
 		*/
 		$mc_numbers[] = sprintf("%s-%s", $docket_type, $docket_number);
 	}
-goto foo;
 	wp_mail($admin_email,
 		"$subject_prefix Docket Number Search List",
 		var_export($mc_numbers, true));
@@ -145,7 +173,6 @@ goto foo;
 	$numbers = $xpath->query(".//th[@scope='row']/text()", $cpl);
 	foreach($numbers as $number)
 		insert_value($instance_id, $number->wholeText);
-foo:
 
 	$found_count = 0;
 	foreach($mc_numbers as $needle)
@@ -245,6 +272,13 @@ add_action('admin_init', function()
 			'type' => 'string',
 		]
 	);
+	register_setting(
+		'dcs_option_group',
+		'dcs_retention_days',
+		[
+			'type' => 'integer',
+		]
+	);
 
 	add_settings_section(
 		'dcs_settings_section',
@@ -253,6 +287,20 @@ add_action('admin_init', function()
 		'dcs_settings'
 	);
 
+	add_settings_field(
+		'dcs_retention_days',
+		'Data Retention (Days)',
+		function() {
+			$key = 'dcs_retention_days';
+			$value = get_option($key);
+			printf("<input name='%s' type='number' value='%s'>",
+				$key,
+				$value
+			);
+		},
+		'dcs_settings',
+		'dcs_settings_section'
+	);
 	add_settings_field(
 		'dcs_notification_email',
 		'Notification Email Address',
