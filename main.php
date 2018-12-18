@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: FocusWP DCS Docket Number Searcher
-Version: 3
+Version: 4
 */
 
 if (!defined( 'WPINC' )) die;
@@ -95,25 +95,21 @@ function insert_value($instance_id, $value)
 	] );
 }
 
-function more_junk($needle)
+function find_stuff($needle)
 {
 	global $wpdb;
 
 	$table_i = $wpdb->prefix . 'fwp_mc_instance';
 	$table_v = $wpdb->prefix . 'fwp_mc_value';
 
-	/*
 	$pq = "SELECT $table_i.time
 		FROM $table_v
 		JOIN $table_i ON $table_i.id = $table_v.instance_id
-		WHERE $table_v.value RLIKE '%sMC-%s%s'";
-	$q = sprintf($pq, '\\\\b', $needle, '\\\\b');
-	*/
-	$pq = "SELECT $table_i.time
-		FROM $table_v
-		JOIN $table_i ON $table_i.id = $table_v.instance_id
-		WHERE $table_v.value RLIKE '%s%s%s'";
-	$q = sprintf($pq, '\\\\b', $needle, '\\\\b');
+		WHERE $table_v.value RLIKE '%s%s-0*%s%s'";
+	$q = sprintf($pq, '\\\\b',
+		$needle['type'],
+		$needle['number'],
+		'\\\\b');
 
 	return $wpdb->get_col($q);
 }
@@ -123,8 +119,6 @@ add_action('dcs_job', function()
 	$admin_email = get_option('dcs_notification_email');
 
 	create_update_tables();
-
-	$instance_id = insert_instance();
 
 	$date = strtoupper(current_time('d-M-y'));
 	$subject_prefix = "DCS $date:";
@@ -138,21 +132,31 @@ add_action('dcs_job', function()
 		],
 		'has_docket_number' => true,
 	]);
-	$mc_numbers = [];
+	$needles = [];
 	foreach($orders as $order)
 	{
 		$docket_type = $order->get_meta('docket_type', true);
 		$docket_number = $order->get_meta('docket_number', true);
-		/*
-		$mc_number = preg_replace('/[^0-9]/', '', $mc_number);
-		if($mc_number != '') $mc_numbers[] = $mc_number;
-		*/
-		$mc_numbers[] = sprintf("%s-%s", $docket_type, $docket_number);
+		$docket_number = trim($docket_number);
+		$docket_number = ltrim($docket_number, '0');
+		$needles[] = [
+			'type' => $docket_type,
+			'number' => $docket_number
+		];
+	}
+	$body = '';
+	foreach($needles as $needle)
+	{
+		$body .= sprintf("%s-%s\n",
+			$needle['type'],
+			$needle['number']
+		);
 	}
 	wp_mail($admin_email,
 		"$subject_prefix Docket Number Search List",
-		var_export($mc_numbers, true));
+		$body);
 
+goto foo;
 	$url = "http://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail?pd_date=$date&pv_vpath=LIVIEW"; 
 	$ch = curl_init($url); 
 	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
@@ -170,21 +174,32 @@ add_action('dcs_job', function()
 	do $cpl = $cpl->nextSibling;
 	while($cpl->nodeName != 'table');
 
-	$numbers = $xpath->query(".//th[@scope='row']/text()", $cpl);
-	foreach($numbers as $number)
+	$published_numbers = $xpath->query(".//th[@scope='row']/text()", $cpl);
+	$instance_id = insert_instance();
+	foreach($published_numbers as $number)
 		insert_value($instance_id, $number->wholeText);
+foo:
 
 	$found_count = 0;
-	foreach($mc_numbers as $needle)
+	foreach($needles as $needle)
 	{
-		$r = more_junk($needle);
+		$r = find_stuff($needle);
 		if($r)
 		{
 			$found_count++;
-			wp_mail($admin_email,
-				"$subject_prefix Search Result for $needle",
-				"Found $needle\n" . var_export($r, true)
+			$subject = sprintf(
+				"%s Search Result for %s-%s",
+				$subject_prefix,
+				$needle['type'],
+				$needle['number']
 			);
+			$body = sprintf(
+				"Found %s-%s:\n%s",
+				$needle['type'],
+				$needle['number'],
+				var_export($r, true)
+			);
+			wp_mail($admin_email, $subject, $body);
 		}
 	}
 
