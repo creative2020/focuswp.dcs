@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: FocusWP DCS Docket Number Searcher
-Version: 6
+Version: 7
 */
 
 if (!defined( 'WPINC' )) die;
@@ -9,18 +9,22 @@ if (!defined( 'WPINC' )) die;
 add_filter('woocommerce_order_data_store_cpt_get_orders_query',
 	function($query, $query_vars)
 	{
-		if(isset($query_vars['has_docket_number']) &&
-			$query_vars['has_docket_number'])
+		if(isset($query_vars['has_unpublished_docket_number']) &&
+			$query_vars['has_unpublished_docket_number'])
 		{
-			$query['meta_query'][] = array(
+			$query['meta_query'][] = [
 				'key' => 'docket_number',
 				'compare' => 'EXISTS',
-			);
+			];
+			$query['meta_query'][] = [
+				'key' => 'docket_published',
+				'compare' => 'NOT EXISTS',
+			];
 		}
 
 		return $query;
 	},
-	10, 2 );
+	10, 2);
 
 function create_update_tables()
 {
@@ -105,7 +109,9 @@ function find_stuff($needle)
 	$pq = "SELECT $table_i.time
 		FROM $table_v
 		JOIN $table_i ON $table_i.id = $table_v.instance_id
-		WHERE $table_v.value RLIKE '%s%s-0*%s%s'";
+		WHERE $table_v.value RLIKE '%s%s-0*%s%s'
+		ORDER BY $table_i.time
+		";
 	$q = sprintf($pq, '\\\\b',
 		$needle['type'],
 		$needle['number'],
@@ -135,7 +141,7 @@ function fetch_and_search($fetch = true)
 			'processing',
 			'completed',
 		],
-		'has_docket_number' => true,
+		'has_unpublished_docket_number' => true,
 	]);
 	$needles = [];
 	foreach($orders as $order)
@@ -145,6 +151,7 @@ function fetch_and_search($fetch = true)
 		$docket_number = trim($docket_number);
 		$docket_number = ltrim($docket_number, '0');
 		$needles[] = [
+			'post_id' => $order->ID,
 			'type' => $docket_type,
 			'number' => $docket_number
 		];
@@ -182,6 +189,11 @@ function fetch_and_search($fetch = true)
 		if($r)
 		{
 			$found_count++;
+			update_post_meta(
+				$needle['post_id'],
+				'docket_published',
+				true
+			);
 			$subject = sprintf(
 				"%s Search Result for %s-%s",
 				$subject_prefix,
@@ -192,7 +204,7 @@ function fetch_and_search($fetch = true)
 				"Found %s-%s:\n%s",
 				$needle['type'],
 				$needle['number'],
-				var_export($r, true)
+				$r[0]
 			);
 			wp_mail($match_email, $subject, $body);
 		}
