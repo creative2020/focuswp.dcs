@@ -195,13 +195,12 @@ function fetch_and_search($fetch = true)
 				true
 			);
 			$subject = sprintf(
-				"%s Search Result for %s-%s",
-				$subject_prefix,
+				"New Authority Granted for %s-%s",
 				$needle['type'],
 				$needle['number']
 			);
 			$body = sprintf(
-				"Found %s-%s:\n%s",
+				"Expedited letter available\n%s-%s\n%s",
 				$needle['type'],
 				$needle['number'],
 				$r[0]
