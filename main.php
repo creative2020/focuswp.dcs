@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: FocusWP DCS Docket Number Searcher
-Version: 5
+Version: 6
 */
 
 if (!defined( 'WPINC' )) die;
@@ -114,7 +114,11 @@ function find_stuff($needle)
 	return $wpdb->get_col($q);
 }
 
-add_action('dcs_job', function()
+add_action('dcs_job', function(){
+	fetch_and_search();
+});
+
+function fetch_and_search($fetch = true)
 {
 	$summary_email = get_option('dcs_notification_email');
 	$match_email = get_option('dcs_match_email');
@@ -146,29 +150,30 @@ add_action('dcs_job', function()
 		];
 	}
 
-#goto foo;
-	$url = "http://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail?pd_date=$date&pv_vpath=LIVIEW"; 
-	$ch = curl_init($url); 
-	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
-	$res = curl_exec($ch); 
-	curl_close($ch);
+	if($fetch)
+	{
+		$url = "http://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail?pd_date=$date&pv_vpath=LIVIEW"; 
+		$ch = curl_init($url); 
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
+		$res = curl_exec($ch); 
+		curl_close($ch);
 
-	$doc = DOMDocument::loadHTML($res);
-	$xpath = new DOMXPath($doc);
+		$doc = DOMDocument::loadHTML($res);
+		$xpath = new DOMXPath($doc);
 
-	$cpl = $xpath->query("//a[@name='CPL']")->item(0);
-	// up to first table
-	do $cpl = $cpl->parentNode;
-	while($cpl->nodeName != 'table');
-	// over to next table
-	do $cpl = $cpl->nextSibling;
-	while($cpl->nodeName != 'table');
+		$cpl = $xpath->query("//a[@name='CPL']")->item(0);
+		// up to first table
+		do $cpl = $cpl->parentNode;
+		while($cpl->nodeName != 'table');
+		// over to next table
+		do $cpl = $cpl->nextSibling;
+		while($cpl->nodeName != 'table');
 
-	$published_numbers = $xpath->query(".//th[@scope='row']/text()", $cpl);
-	$instance_id = insert_instance();
-	foreach($published_numbers as $number)
-		insert_value($instance_id, $number->wholeText);
-#foo:
+		$published_numbers = $xpath->query(".//th[@scope='row']/text()", $cpl);
+		$instance_id = insert_instance();
+		foreach($published_numbers as $number)
+			insert_value($instance_id, $number->wholeText);
+	}
 
 	$found_count = 0;
 	foreach($needles as $needle)
@@ -207,7 +212,7 @@ add_action('dcs_job', function()
 		$body
 	);
 
-});
+}
 
 function render_dcs_admin_page()
 {
@@ -355,4 +360,10 @@ add_action('admin_init', function()
 		'dcs_settings',
 		'dcs_settings_section'
 	);
+});
+
+add_action('tools_page_dcs', function()
+{
+	if(isset($_GET['s']))
+		fetch_and_search(false);
 });
