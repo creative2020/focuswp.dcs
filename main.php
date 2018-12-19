@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: FocusWP DCS Docket Number Searcher
-Version: 4
+Version: 5
 */
 
 if (!defined( 'WPINC' )) die;
@@ -116,7 +116,8 @@ function find_stuff($needle)
 
 add_action('dcs_job', function()
 {
-	$admin_email = get_option('dcs_notification_email');
+	$summary_email = get_option('dcs_notification_email');
+	$match_email = get_option('dcs_match_email');
 
 	create_update_tables();
 
@@ -144,19 +145,8 @@ add_action('dcs_job', function()
 			'number' => $docket_number
 		];
 	}
-	$body = '';
-	foreach($needles as $needle)
-	{
-		$body .= sprintf("%s-%s\n",
-			$needle['type'],
-			$needle['number']
-		);
-	}
-	wp_mail($admin_email,
-		"$subject_prefix Docket Number Search List",
-		$body);
 
-goto foo;
+#goto foo;
 	$url = "http://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail?pd_date=$date&pv_vpath=LIVIEW"; 
 	$ch = curl_init($url); 
 	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
@@ -178,7 +168,7 @@ goto foo;
 	$instance_id = insert_instance();
 	foreach($published_numbers as $number)
 		insert_value($instance_id, $number->wholeText);
-foo:
+#foo:
 
 	$found_count = 0;
 	foreach($needles as $needle)
@@ -199,13 +189,22 @@ foo:
 				$needle['number'],
 				var_export($r, true)
 			);
-			wp_mail($admin_email, $subject, $body);
+			wp_mail($match_email, $subject, $body);
 		}
 	}
 
-	wp_mail($admin_email,
-		"$subject_prefix Search Result Count",
-		"Found $found_count target docket numbers."
+	$body = "Found $found_count target docket numbers.\n\n";
+	$body .= "Search Criteria:\n";
+	foreach($needles as $needle)
+	{
+		$body .= sprintf("%s-%s\n",
+			$needle['type'],
+			$needle['number']
+		);
+	}
+	wp_mail($summary_email,
+		"$subject_prefix Summary",
+		$body
 	);
 
 });
@@ -280,21 +279,6 @@ add_action('admin_post_dcs_unschedsched', function()
 
 add_action('admin_init', function()
 {
-	register_setting(
-		'dcs_option_group',
-		'dcs_notification_email',
-		[
-			'type' => 'string',
-		]
-	);
-	register_setting(
-		'dcs_option_group',
-		'dcs_retention_days',
-		[
-			'type' => 'integer',
-		]
-	);
-
 	add_settings_section(
 		'dcs_settings_section',
 		'',
@@ -302,6 +286,13 @@ add_action('admin_init', function()
 		'dcs_settings'
 	);
 
+	register_setting(
+		'dcs_option_group',
+		'dcs_retention_days',
+		[
+			'type' => 'integer',
+		]
+	);
 	add_settings_field(
 		'dcs_retention_days',
 		'Data Retention (Days)',
@@ -316,11 +307,43 @@ add_action('admin_init', function()
 		'dcs_settings',
 		'dcs_settings_section'
 	);
+
+	register_setting(
+		'dcs_option_group',
+		'dcs_notification_email',
+		[
+			'type' => 'string',
+		]
+	);
 	add_settings_field(
 		'dcs_notification_email',
-		'Notification Email Address',
+		'Summary Email Addresses',
 		function() {
 			$key = 'dcs_notification_email';
+			$value = get_option($key);
+			$style = 'width: 100%;';
+			printf("<input name='%s' value='%s' style='%s'>",
+				$key,
+				$value,
+				$style
+			);
+		},
+		'dcs_settings',
+		'dcs_settings_section'
+	);
+
+	register_setting(
+		'dcs_option_group',
+		'dcs_match_email',
+		[
+			'type' => 'string',
+		]
+	);
+	add_settings_field(
+		'dcs_match_email',
+		'Match Email Addresses',
+		function() {
+			$key = 'dcs_match_email';
 			$value = get_option($key);
 			$style = 'width: 100%;';
 			printf("<input name='%s' value='%s' style='%s'>",
