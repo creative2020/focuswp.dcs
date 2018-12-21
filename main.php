@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: FocusWP DCS Docket Number Searcher
-Version: 7
+Version: 8
 */
 
 if (!defined( 'WPINC' )) die;
@@ -112,10 +112,18 @@ function find_stuff($needle)
 		WHERE $table_v.value RLIKE '%s%s-0*%s%s'
 		ORDER BY $table_i.time
 		";
-	$q = sprintf($pq, '\\\\b',
+	/*
+	$q = sprintf($pq,
+		'\\\\b',
 		$needle['type'],
 		$needle['number'],
 		'\\\\b');
+	 */
+	$q = sprintf($pq,
+		'[[:<:]]',
+		$needle['type'],
+		$needle['number'],
+		'[[:>:]]');
 
 	return $wpdb->get_col($q);
 }
