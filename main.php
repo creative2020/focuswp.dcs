@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: FocusWP DCS Docket Number Searcher
-Version: 8
+Version: 9
 */
 
 if (!defined( 'WPINC' )) die;
@@ -167,7 +167,8 @@ function fetch_and_search($fetch = true)
 
 	if($fetch)
 	{
-		$url = "http://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail?pd_date=$date&pv_vpath=LIVIEW"; 
+		$url = "https://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail?pd_date=$date&pv_vpath=LIVIEW";
+
 		$ch = curl_init($url); 
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
 		$res = curl_exec($ch); 
