@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: FocusWP DCS Docket Number Searcher
-Version: 10
+Version: 11
 */
 
 if (!defined( 'WPINC' )) die;
@@ -160,10 +160,14 @@ function fetch_and_search($fetch = true)
 	foreach($wc_orders as $order)
 	{
 		$docket_type = $order->get_meta('docket_type', true);
+		$docket_type = trim($docket_type);
+		$docket_type = strtoupper($docket_type);
+
 		$docket_number = $order->get_meta('docket_number', true);
 		$docket_number = trim($docket_number);
 		$docket_number = ltrim($docket_number, '0');
 		$docket = sprintf("%s%s", $docket_type, $docket_number);
+
 		$docket_published = $order->get_meta('docket_published', true);
 
 		$ela = false;
@@ -257,7 +261,7 @@ function fetch_and_search($fetch = true)
 	$body .= "Search Criteria:\n";
 	foreach($needles as $needle)
 	{
-		$body .= $needle;
+		$body .= "$needle\n";
 	}
 	wp_mail($summary_email,
 		"$subject_prefix Summary",
