@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: FocusWP DCS Docket Number Searcher
-Version: 9
+Version: 10
 */
 
 if (!defined( 'WPINC' )) die;
@@ -9,17 +9,23 @@ if (!defined( 'WPINC' )) die;
 add_filter('woocommerce_order_data_store_cpt_get_orders_query',
 	function($query, $query_vars)
 	{
-		if(isset($query_vars['has_unpublished_docket_number']) &&
-			$query_vars['has_unpublished_docket_number'])
+		if(isset($query_vars['has_docket_number']) &&
+			$query_vars['has_docket_number'])
 		{
+			$query['meta_query'][] = [
+				'key' => 'docket_type',
+				'compare' => 'EXISTS',
+			];
 			$query['meta_query'][] = [
 				'key' => 'docket_number',
 				'compare' => 'EXISTS',
 			];
+			/*
 			$query['meta_query'][] = [
 				'key' => 'docket_published',
 				'compare' => 'NOT EXISTS',
 			];
+			 */
 		}
 
 		return $query;
@@ -99,7 +105,7 @@ function insert_value($instance_id, $value)
 	] );
 }
 
-function find_stuff($needle)
+function find_stuff($docket_type, $docket_number)
 {
 	global $wpdb;
 
@@ -115,14 +121,14 @@ function find_stuff($needle)
 	/*
 	$q = sprintf($pq,
 		'\\\\b',
-		$needle['type'],
-		$needle['number'],
+		$docket_type,
+		$docket_number,
 		'\\\\b');
 	 */
 	$q = sprintf($pq,
 		'[[:<:]]',
-		$needle['type'],
-		$needle['number'],
+		$docket_type,
+		$docket_number,
 		'[[:>:]]');
 
 	return $wpdb->get_col($q);
@@ -142,26 +148,37 @@ function fetch_and_search($fetch = true)
 	$date = strtoupper(current_time('d-M-y'));
 	$subject_prefix = "DCS $date:";
 
-	$orders = wc_get_orders([
+	$wc_orders = wc_get_orders([
 		'limit' => -1,
 		'type' => 'shop_order',
-		'status' => [
-			'processing',
-			'completed',
-		],
-		'has_unpublished_docket_number' => true,
+		'status' => [ 'processing', 'completed', ],
+		'has_docket_number' => true,
 	]);
-	$needles = [];
-	foreach($orders as $order)
+
+	$dockets = [];
+
+	foreach($wc_orders as $order)
 	{
 		$docket_type = $order->get_meta('docket_type', true);
 		$docket_number = $order->get_meta('docket_number', true);
 		$docket_number = trim($docket_number);
 		$docket_number = ltrim($docket_number, '0');
-		$needles[] = [
-			'post_id' => $order->ID,
-			'type' => $docket_type,
-			'number' => $docket_number
+		$docket = sprintf("%s%s", $docket_type, $docket_number);
+		$docket_published = $order->get_meta('docket_published', true);
+
+		$ela = false;
+		foreach($order->get_items() as $item) {
+			$name = $item->get_name();
+			if($name == 'Expedited Letter of Authority')
+				$ela = true;
+		}
+
+		$dockets[$docket]['type'] = $docket_type;
+		$dockets[$docket]['number'] = $docket_number;
+		$dockets[$docket]['orders'][] = [
+			'id' => $order->ID,
+			'published' => $docket_published ? true : false,
+			'ela' => $ela,
 		];
 	}
 
@@ -191,30 +208,48 @@ function fetch_and_search($fetch = true)
 			insert_value($instance_id, $number->wholeText);
 	}
 
+	$needles = [];
 	$found_count = 0;
-	foreach($needles as $needle)
+	foreach($dockets as $docket)
 	{
-		$r = find_stuff($needle);
-		if($r)
+		// if a published ela is present, continue
+		if(docket_order_exists($docket['orders'], true, true))
+			continue;
+
+		// if an unpublished ela is present, look for stuff
+		if($id = docket_order_exists($docket['orders'], true, false))
 		{
-			$found_count++;
-			update_post_meta(
-				$needle['post_id'],
-				'docket_published',
-				true
+			$needles[] = sprintf("%s-%s",
+				$docket['type'],
+				$docket['number']);
+			$found_count += process_docket(
+				$docket['type'],
+				$docket['number'],
+				$id,
+				true,
+				$match_email
 			);
-			$subject = sprintf(
-				"New Authority Granted for %s-%s",
-				$needle['type'],
-				$needle['number']
+			continue;
+		}
+
+		// if a published non-ela is present, continue
+		if(docket_order_exists($docket['orders'], false, true))
+			continue;
+
+		// if an unpublished non-ela is present, look for stuff
+		if($id = docket_order_exists($docket['orders'], false, false))
+		{
+			$needles[] = sprintf("%s-%s",
+				$docket['type'],
+				$docket['number']);
+			$found_count += process_docket(
+				$docket['type'],
+				$docket['number'],
+				$id,
+				false,
+				$match_email
 			);
-			$body = sprintf(
-				"Expedited letter available\n%s-%s\n%s",
-				$needle['type'],
-				$needle['number'],
-				$r[0]
-			);
-			wp_mail($match_email, $subject, $body);
+			continue;
 		}
 	}
 
@@ -222,16 +257,51 @@ function fetch_and_search($fetch = true)
 	$body .= "Search Criteria:\n";
 	foreach($needles as $needle)
 	{
-		$body .= sprintf("%s-%s\n",
-			$needle['type'],
-			$needle['number']
-		);
+		$body .= $needle;
 	}
 	wp_mail($summary_email,
 		"$subject_prefix Summary",
 		$body
 	);
+}
 
+function process_docket($type, $number, $id, $ela, $match_email)
+{
+	if(find_stuff($type, $number))
+	{
+		update_post_meta(
+			$id,
+			'docket_published',
+			true
+		);
+		$subject = sprintf(
+			"New Authority Granted for %s-%s%s",
+			$type,
+			$number,
+			$ela ? ' (Expedited)' : ''
+		);
+		/*
+		$body = sprintf(
+			"Expedited letter available\n%s-%s\n%s",
+			$needle['type'],
+			$needle['number'],
+			$r[0]
+		);
+		 */
+		wp_mail($match_email, $subject, $subject);
+		return 1;
+	}
+	return 0;
+}
+
+function docket_order_exists($orders, $ela, $published)
+{
+	foreach($orders as $order)
+	{
+		if($order['ela'] == $ela && $order['published'] == $published)
+			return $order['id'];
+	}
+	return false;
 }
 
 function render_dcs_admin_page()
