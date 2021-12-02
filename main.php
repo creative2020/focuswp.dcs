@@ -1,17 +1,18 @@
 <?php
 /*
 Plugin Name: FocusWP DCS Docket Number Searcher
-Version: 11
+Version: 12
 */
 
-if (!defined( 'WPINC' )) die;
+if (!defined('WPINC')) die;
 
-add_filter('woocommerce_order_data_store_cpt_get_orders_query',
-	function($query, $query_vars)
-	{
-		if(isset($query_vars['has_docket_number']) &&
-			$query_vars['has_docket_number'])
-		{
+add_filter(
+	'woocommerce_order_data_store_cpt_get_orders_query',
+	function ($query, $query_vars) {
+		if (
+			isset($query_vars['has_docket_number']) &&
+			$query_vars['has_docket_number']
+		) {
 			$query['meta_query'][] = [
 				'key' => 'docket_type',
 				'compare' => 'EXISTS',
@@ -30,13 +31,15 @@ add_filter('woocommerce_order_data_store_cpt_get_orders_query',
 
 		return $query;
 	},
-	10, 2);
+	10,
+	2
+);
 
 function create_update_tables()
 {
 	global $wpdb;
 	$charset_collate = $wpdb->get_charset_collate();
-	require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
+	require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
 
 	$tbl_i = $wpdb->prefix . 'fwp_mc_instance';
 	$sql = "CREATE TABLE $tbl_i (
@@ -44,7 +47,7 @@ function create_update_tables()
 		time datetime DEFAULT '0000-00-00 00:00:00' NOT NULL,
 		PRIMARY KEY  (id)
 	) $charset_collate;";
-	dbDelta( $sql );
+	dbDelta($sql);
 
 	$tbl_v = $wpdb->prefix . 'fwp_mc_value';
 	$sql = "CREATE TABLE $tbl_v (
@@ -53,7 +56,7 @@ function create_update_tables()
 		value varchar(32) NOT NULL,
 		PRIMARY KEY  (id)
 	) $charset_collate;";
-	dbDelta( $sql );
+	dbDelta($sql);
 
 	cleanup();
 }
@@ -65,8 +68,7 @@ function cleanup()
 	$tbl_v = $wpdb->prefix . 'fwp_mc_value';
 
 	$retention = get_option('dcs_retention_days');
-	if($retention)
-	{
+	if ($retention) {
 		$tz = new DateTimeZone(get_option('timezone_string'));
 		$t = new DateTime('00:00', $tz);
 		$t->sub(new DateInterval("P{$retention}D"));
@@ -90,7 +92,7 @@ function insert_instance()
 	global $wpdb;
 
 	$table_name = $wpdb->prefix . 'fwp_mc_instance';
-	$wpdb->insert( $table_name, [ 'time' => current_time( 'mysql' ) ] );
+	$wpdb->insert($table_name, ['time' => current_time('mysql')]);
 	return $wpdb->insert_id;
 }
 
@@ -99,10 +101,10 @@ function insert_value($instance_id, $value)
 	global $wpdb;
 
 	$table_name = $wpdb->prefix . 'fwp_mc_value';
-	$wpdb->insert( $table_name, [
+	$wpdb->insert($table_name, [
 		'instance_id' => $instance_id,
 		'value' => $value
-	] );
+	]);
 }
 
 function find_stuff($docket_type, $docket_number)
@@ -125,21 +127,24 @@ function find_stuff($docket_type, $docket_number)
 		$docket_number,
 		'\\\\b');
 	 */
-	$q = sprintf($pq,
+	$q = sprintf(
+		$pq,
 		'[[:<:]]',
 		$docket_type,
 		$docket_number,
-		'[[:>:]]');
+		'[[:>:]]'
+	);
 
 	return $wpdb->get_col($q);
 }
 
-add_action('dcs_job', function(){
+add_action('dcs_job', function () {
 	fetch_and_search();
 });
 
 function fetch_and_search($fetch = true)
 {
+
 	$summary_email = get_option('dcs_notification_email');
 	$match_email = get_option('dcs_match_email');
 
@@ -149,16 +154,20 @@ function fetch_and_search($fetch = true)
 	$subject_prefix = "DCS $date:";
 
 	$wc_orders = wc_get_orders([
-		'limit' => -1,
+		'limit' => 1000,
 		'type' => 'shop_order',
-		'status' => [ 'processing', 'completed', ],
-		'has_docket_number' => true,
+		'status' => ['processing', 'completed',],
+		// derek had this way which does not appear to work anymore
+		// 'has_docket_number' => true, 
+
+		// Jeff new method 2021-12-01
+		'meta_key'     => 'docket_number',
+		'meta_compare' => 'EXISTS',
 	]);
 
 	$dockets = [];
 
-	foreach($wc_orders as $order)
-	{
+	foreach ($wc_orders as $order) {
 		$docket_type = $order->get_meta('docket_type', true);
 		$docket_type = trim($docket_type);
 		$docket_type = strtoupper($docket_type);
@@ -171,9 +180,9 @@ function fetch_and_search($fetch = true)
 		$docket_published = $order->get_meta('docket_published', true);
 
 		$ela = false;
-		foreach($order->get_items() as $item) {
+		foreach ($order->get_items() as $item) {
 			$name = $item->get_name();
-			if($name == 'Expedited Letter of Authority')
+			if ($name == 'Expedited Letter of Authority')
 				$ela = true;
 		}
 
@@ -186,46 +195,50 @@ function fetch_and_search($fetch = true)
 		];
 	}
 
-	if($fetch)
-	{
+	// manual enter date
+	// $date = '12-NOV-21';
+
+	if ($fetch) {
 		$url = "https://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail?pd_date=$date&pv_vpath=LIVIEW";
 
-		$ch = curl_init($url); 
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
-		$res = curl_exec($ch); 
+		$ch = curl_init($url);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		$res = curl_exec($ch);
 		curl_close($ch);
 
+		error_log('libxml_use_internal_errors(true)');
+		libxml_use_internal_errors(true);
 		$doc = DOMDocument::loadHTML($res);
 		$xpath = new DOMXPath($doc);
 
 		$cpl = $xpath->query("//a[@name='CPL']")->item(0);
 		// up to first table
 		do $cpl = $cpl->parentNode;
-		while($cpl->nodeName != 'table');
+		while ($cpl->nodeName != 'table');
 		// over to next table
 		do $cpl = $cpl->nextSibling;
-		while($cpl->nodeName != 'table');
+		while ($cpl->nodeName != 'table');
 
 		$published_numbers = $xpath->query(".//th[@scope='row']/text()", $cpl);
 		$instance_id = insert_instance();
-		foreach($published_numbers as $number)
+		foreach ($published_numbers as $number)
 			insert_value($instance_id, $number->wholeText);
 	}
 
 	$needles = [];
 	$found_count = 0;
-	foreach($dockets as $docket)
-	{
+	foreach ($dockets as $docket) {
 		// if a published ela is present, continue
-		if(docket_order_exists($docket['orders'], true, true))
+		if (docket_order_exists($docket['orders'], true, true))
 			continue;
 
 		// if an unpublished ela is present, look for stuff
-		if($id = docket_order_exists($docket['orders'], true, false))
-		{
-			$needles[] = sprintf("%s-%s",
+		if ($id = docket_order_exists($docket['orders'], true, false)) {
+			$needles[] = sprintf(
+				"%s-%s",
 				$docket['type'],
-				$docket['number']);
+				$docket['number']
+			);
 			$found_count += process_docket(
 				$docket['type'],
 				$docket['number'],
@@ -237,12 +250,13 @@ function fetch_and_search($fetch = true)
 		}
 
 		// if a published non-ela is present, continue
-		if(docket_order_exists($docket['orders'], false, true))
+		if (docket_order_exists($docket['orders'], false, true))
 			continue;
 
 		// if an unpublished non-ela is present, look for stuff
-		if($id = docket_order_exists($docket['orders'], false, false))
-		{
+		if ($id = docket_order_exists($docket['orders'], false, false)) {
+			// edit: ignore non-ela orders
+			/*  
 			$needles[] = sprintf("%s-%s",
 				$docket['type'],
 				$docket['number']);
@@ -253,17 +267,18 @@ function fetch_and_search($fetch = true)
 				false,
 				$match_email
 			);
+			*/
 			continue;
 		}
 	}
 
 	$body = "Found $found_count target docket numbers.\n\n";
 	$body .= "Search Criteria:\n";
-	foreach($needles as $needle)
-	{
+	foreach ($needles as $needle) {
 		$body .= "$needle\n";
 	}
-	wp_mail($summary_email,
+	wp_mail(
+		$summary_email,
 		"$subject_prefix Summary",
 		$body
 	);
@@ -271,8 +286,7 @@ function fetch_and_search($fetch = true)
 
 function process_docket($type, $number, $id, $ela, $match_email)
 {
-	if(find_stuff($type, $number))
-	{
+	if (find_stuff($type, $number)) {
 		update_post_meta(
 			$id,
 			'docket_published',
@@ -300,9 +314,8 @@ function process_docket($type, $number, $id, $ela, $match_email)
 
 function docket_order_exists($orders, $ela, $published)
 {
-	foreach($orders as $order)
-	{
-		if($order['ela'] == $ela && $order['published'] == $published)
+	foreach ($orders as $order) {
+		if ($order['ela'] == $ela && $order['published'] == $published)
 			return $order['id'];
 	}
 	return false;
@@ -319,8 +332,7 @@ function render_dcs_admin_page()
 
 	$next = wp_next_scheduled('dcs_job');
 	$ref = admin_url('admin-post.php');
-	if($next)
-	{
+	if ($next) {
 		$nextf = strftime('%FT%T', $next);
 		$tm = $next - time();
 		echo "<p>";
@@ -328,19 +340,21 @@ function render_dcs_admin_page()
 		echo "<a href='$ref?action=dcs_unschedsched' class='button'>Run Now</a> ";
 		echo "<a href='$ref?action=dcs_unsched' class='button'>Disable</a><br>";
 		echo "</p>";
-	}
-	else
-	{
+	} else {
 		echo "<p>";
 		echo "Job is unscheduled<br>";
 		echo "<a href='$ref?action=dcs_sched' class='button'>Enable</a><br>";
 		echo "</p>";
 	}
 	echo "</div>";
+
+	echo '<div>';
+	echo '<h2>Orders:</h2>';
+	fwp_current_orders();
+	echo '</div>';
 }
 
-add_action('admin_menu', function()
-{
+add_action('admin_menu', function () {
 	add_management_page(
 		'DCS',
 		'DCS',
@@ -350,38 +364,35 @@ add_action('admin_menu', function()
 	);
 });
 
-add_action('admin_post_dcs_sched', function()
-{
+add_action('admin_post_dcs_sched', function () {
 	wp_schedule_event(time(), 'daily', 'dcs_job');
-	if(wp_get_referer())
+	if (wp_get_referer())
 		wp_safe_redirect(wp_get_referer());
 });
 
-add_action('admin_post_dcs_unsched', function()
-{
+add_action('admin_post_dcs_unsched', function () {
 	$next = wp_next_scheduled('dcs_job');
-	if($next)
+	if ($next)
 		wp_unschedule_event($next, 'dcs_job');
-	if(wp_get_referer())
+	if (wp_get_referer())
 		wp_safe_redirect(wp_get_referer());
 });
 
-add_action('admin_post_dcs_unschedsched', function()
-{
+add_action('admin_post_dcs_unschedsched', function () {
 	$next = wp_next_scheduled('dcs_job');
-	if($next)
+	if ($next)
 		wp_unschedule_event($next, 'dcs_job');
 	wp_schedule_event(time(), 'daily', 'dcs_job');
-	if(wp_get_referer())
+	if (wp_get_referer())
 		wp_safe_redirect(wp_get_referer());
 });
 
-add_action('admin_init', function()
-{
+add_action('admin_init', function () {
 	add_settings_section(
 		'dcs_settings_section',
 		'',
-		function() { },
+		function () {
+		},
 		'dcs_settings'
 	);
 
@@ -395,10 +406,11 @@ add_action('admin_init', function()
 	add_settings_field(
 		'dcs_retention_days',
 		'Data Retention (Days)',
-		function() {
+		function () {
 			$key = 'dcs_retention_days';
 			$value = get_option($key);
-			printf("<input name='%s' type='number' value='%s'>",
+			printf(
+				"<input name='%s' type='number' value='%s'>",
 				$key,
 				$value
 			);
@@ -417,11 +429,12 @@ add_action('admin_init', function()
 	add_settings_field(
 		'dcs_notification_email',
 		'Summary Email Addresses',
-		function() {
+		function () {
 			$key = 'dcs_notification_email';
 			$value = get_option($key);
 			$style = 'width: 100%;';
-			printf("<input name='%s' value='%s' style='%s'>",
+			printf(
+				"<input name='%s' value='%s' style='%s'>",
 				$key,
 				$value,
 				$style
@@ -441,11 +454,12 @@ add_action('admin_init', function()
 	add_settings_field(
 		'dcs_match_email',
 		'Match Email Addresses',
-		function() {
+		function () {
 			$key = 'dcs_match_email';
 			$value = get_option($key);
 			$style = 'width: 100%;';
-			printf("<input name='%s' value='%s' style='%s'>",
+			printf(
+				"<input name='%s' value='%s' style='%s'>",
 				$key,
 				$value,
 				$style
@@ -456,8 +470,77 @@ add_action('admin_init', function()
 	);
 });
 
-add_action('tools_page_dcs', function()
-{
-	if(isset($_GET['s']))
+add_action('tools_page_dcs', function () {
+	if (isset($_GET['s']))
 		fetch_and_search(false);
 });
+
+// Jeff
+// Show me data
+function showme($obj)
+{
+	echo "<pre>" . print_r($obj, true) . "</pre>";
+}
+
+// ****************************************************
+if (!function_exists('fwp_current_orders')) :
+	/**
+	 * display current orders
+	 */
+	function fwp_current_orders()
+	{
+		// current orders
+		$wc_orders = wc_get_orders([
+			'limit' => 1000,
+			'type' => 'shop_order',
+			'status' => ['processing', 'completed',],
+			'meta_key'     => 'docket_number',
+			'meta_compare' => 'EXISTS',
+		]);
+
+		// filter orders
+		$open = $hits = '';
+		foreach ($wc_orders as $order) {
+			// published already?
+			$docket_published = $order->get_meta('docket_published', true);
+			// has ela item
+			foreach ($order->get_items() as $item) {
+				$name = $item->get_name();
+				if ($name == 'Expedited Letter of Authority') {
+					$ela = true;
+				} else {
+					$ela = false;
+				}
+			}
+
+			if ($docket_published == false && $ela == true) {
+				$order_date = $order->data['date_created'];
+				$order_date = $order_date->date('m-d-Y');
+				$open .= $order_date . ' - ' . $order->id . ' - ' . $order->data['billing']['last_name'] . ', ';
+
+				foreach ($order->meta_data as $meta) {
+					if ($meta->key == 'docket_number') {
+						$open .= 'docket number: ' . $meta->value . '<br>';
+					}
+				}
+			} elseif ($docket_published == true && $ela == true) {
+				$hits .= $order_date . ' - ' . $order->id . ' - ' . $order->data['billing']['last_name'] . ', ';
+				foreach ($order->meta_data as $meta) {
+					if ($meta->key == 'docket_number') {
+						$hits .= 'docket number: ' . $meta->value . '<br>';
+					}
+				}
+			}
+		}
+
+		// display orders
+		echo '<div style="display:inline-block;width:40%;vertical-align:top;">';
+		echo '<h3>Open</h3>';
+		echo $open;
+		echo '</div>';
+		echo '<div style="display:inline-block;width:40%;vertical-align:top;">';
+		echo '<h3>Hits</h3>';
+		echo $hits;
+		echo '</div>';
+	}
+endif;
